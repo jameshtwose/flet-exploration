@@ -1,7 +1,8 @@
 import flet as ft
 import os
 from collections import defaultdict
-
+import re
+import time
 
 def main(page: ft.Page):
     page.title = "Duplicates Finder"
@@ -10,6 +11,7 @@ def main(page: ft.Page):
     folder_path = ft.TextField(label="Folder Path", width=400, read_only=True)
     file_list = ft.ListView(expand=True)
     select_all_checkbox = ft.Checkbox(label="Select/Deselect All", value=True)
+    loading_indicator = ft.ProgressBar(width=400, visible=False)
 
     def format_size(size):
         # Convert bytes to KB, MB, or GB
@@ -36,20 +38,62 @@ def main(page: ft.Page):
                 checkbox.value = select_all_checkbox.value
         file_list.update()
 
+    def list_files_task(path):
+        file_groups = defaultdict(list)
+        start_time = time.time()
+        for root, _, files in os.walk(path):
+            for file in files:
+                base_name = re.sub(r'(\(\d+\)| - Copy)$', '', os.path.splitext(file)[0])
+                file_path = os.path.join(root, file)
+                file_groups[base_name].append(file_path)
+                # Yield control back to the UI every 100 files
+                if len(file_groups) % 100 == 0:
+                    yield
+                # Check if the operation is taking too long
+                if time.time() - start_time > 3:
+                    raise TimeoutError("Too many files, operation timed out.")
+        yield file_groups
+
+    def close_timeout_dialog(e):
+        page.close(timeout_dialog)
+
+    action_button_style = ft.ButtonStyle(
+        color=ft.Colors.BLACK,
+        shape=ft.RoundedRectangleBorder(radius=5),
+        side=ft.BorderSide(color=ft.Colors.BLACK, width=1),
+    )
+
+    timeout_dialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Timeout Error"),
+        content=ft.Text("Too many files, operation timed out. Please select a folder with fewer files."),
+        actions=[
+            ft.TextButton(text="Close", style=action_button_style, on_click=close_timeout_dialog),
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+        bgcolor=ft.Colors.RED_100,
+    )
+
     def list_files(e):
         path = folder_path.value
         if os.path.isdir(path):
             file_list.controls.clear()
-            file_groups = defaultdict(list)
+            loading_indicator.visible = True
+            loading_indicator.update()
 
-            for root, _, files in os.walk(path):
-                for file in files:
-                    base_name = os.path.splitext(file)[0]
-                    file_path = os.path.join(root, file)
-                    file_groups[base_name].append(file_path)
+            try:
+                file_groups = None
+                for result in list_files_task(path):
+                    if isinstance(result, dict):
+                        file_groups = result
+                    page.update()
+            except TimeoutError as ex:
+                page.open(timeout_dialog)
+                loading_indicator.visible = False
+                loading_indicator.update()
+                return
 
             duplicates = {k: v for k, v in file_groups.items() if len(v) > 1}
-
             if duplicates:
                 duplicate_info = []
                 for base_name, files in duplicates.items():
@@ -82,8 +126,9 @@ def main(page: ft.Page):
                         )
             else:
                 file_list.controls.append(ft.Text("No duplicates found"))
-
             file_list.update()
+            loading_indicator.visible = False
+            loading_indicator.update()
         else:
             file_list.controls.clear()
             file_list.controls.append(ft.Text("Invalid folder path"))
@@ -171,6 +216,7 @@ Click the 'Help' button to see this dialog again.
                     alignment=ft.MainAxisAlignment.START,
                 ),
                 select_all_checkbox,
+                loading_indicator,
                 file_list,
                 ft.Container(
                     content=ft.ElevatedButton("Help", on_click=open_help_dialog),
@@ -181,6 +227,5 @@ Click the 'Help' button to see this dialog again.
             expand=True,
         )
     )
-
 
 ft.app(main, assets_dir="assets")
