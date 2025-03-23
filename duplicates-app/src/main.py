@@ -39,13 +39,14 @@ def main(page: ft.Page):
     def list_files(e):
         path = folder_path.value
         if os.path.isdir(path):
-            files = os.listdir(path)
             file_list.controls.clear()
             file_groups = defaultdict(list)
 
-            for file in files:
-                base_name = os.path.splitext(file)[0]
-                file_groups[base_name].append(file)
+            for root, _, files in os.walk(path):
+                for file in files:
+                    base_name = os.path.splitext(file)[0]
+                    file_path = os.path.join(root, file)
+                    file_groups[base_name].append(file_path)
 
             duplicates = {k: v for k, v in file_groups.items() if len(v) > 1}
 
@@ -54,8 +55,7 @@ def main(page: ft.Page):
                 for base_name, files in duplicates.items():
                     file_info = []
                     for file in files:
-                        file_path = os.path.join(path, file)
-                        file_size = os.path.getsize(file_path)
+                        file_size = os.path.getsize(file)
                         formatted_size = format_size(file_size)
                         file_info.append((file, formatted_size, file_size))
                         # Sort files by size
@@ -74,9 +74,7 @@ def main(page: ft.Page):
                         file_list.controls.append(
                             ft.Row(
                                 [
-                                    ft.Checkbox(
-                                        value=(i == 0)
-                                    ),  # Select only the largest file
+                                    ft.Checkbox(value=(i == 0)),  # Select only the largest file
                                     ft.Text(file),
                                     ft.Text(formatted_size),
                                 ]
@@ -97,9 +95,8 @@ def main(page: ft.Page):
             for control in file_list.controls:
                 if isinstance(control, ft.Row):
                     checkbox = control.controls[0]
-                    file_name = control.controls[1].value
+                    file_path = control.controls[1].value
                     if checkbox.value:
-                        file_path = os.path.join(path, file_name)
                         if os.path.isfile(file_path):
                             os.remove(file_path)
             list_files(None)
